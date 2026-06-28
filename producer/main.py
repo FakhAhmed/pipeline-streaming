@@ -41,8 +41,18 @@ def delivery_report(err, msg):
 
 def generate_transaction():
     user_id = random.randint(100, 150) 
-    is_fraudulent = random.random() < 0.05 
-    amount = round(random.uniform(1000.0, 5000.0), 2) if is_fraudulent else round(random.uniform(5.0, 100.0), 2)
+    
+    # Simulation des scénarios
+    scenario = random.random()
+    if scenario < 0.05:
+        # 5% de chance : FRAUDE
+        amount = round(random.uniform(1000.0, 5000.0), 2)
+    elif scenario > 0.95:
+        # 5% de chance : ERREUR CAPTEUR (Montant négatif aberrant)
+        amount = round(random.uniform(-1000.0, -1.0), 2)
+    else:
+        # 90% de chance : NORMAL
+        amount = round(random.uniform(5.0, 100.0), 2)
     
     return {
         "transaction_id": fake.uuid4(),

@@ -5,6 +5,9 @@ from pyflink.table import EnvironmentSettings, TableEnvironment
 env_settings = EnvironmentSettings.in_streaming_mode()
 t_env = TableEnvironment.create(env_settings)
 
+# On règle le conflit Java (Jar Hell) entre Flink et Iceberg
+t_env.get_config().set("classloader.resolve-order", "parent-first")
+
 #On force Iceberg à "valider" (commit) les données toutes les 10 secondes
 t_env.get_config().set("execution.checkpointing.interval", "10000")
 
@@ -38,7 +41,7 @@ source_ddl = """
 """
 t_env.execute_sql(source_ddl)
 
-# 3. La Destination (Table Iceberg dans Google Cloud Storage)
+# 3. Destination 1 : Data Lake (GCP / Iceberg) pour les vraies fraudes
 iceberg_ddl = """
     CREATE TABLE fraud_alerts (
         user_id STRING,
@@ -54,18 +57,45 @@ iceberg_ddl = """
 """
 t_env.execute_sql(iceberg_ddl)
 
-# 4. Le Pipeline d'Écriture
-print("🚀 Lancement du Pipeline Flink : Écriture des fraudes vers Google Cloud Storage (Iceberg)...")
+# 4. Destination 2 : La DLQ (Kafka) pour les erreurs de capteur
+dlq_ddl = """
+    CREATE TABLE transactions_dlq (
+        transaction_id STRING,
+        user_id STRING,
+        amount DOUBLE,
+        `timestamp` BIGINT,
+        merchant STRING,
+        location STRING
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'transactions-dlq',
+        'properties.bootstrap.servers' = 'kafka:29092',
+        'format' = 'json' 
+    )
+"""
+t_env.execute_sql(dlq_ddl)
 
-insert_query = """
+# 5. Le Pipeline de Routage (Multi-Sink)
+print("🚀 Lancement du Pipeline Flink : Routage Multi-Sink (Iceberg + DLQ)...")
+
+# On utilise un StatementSet pour exécuter plusieurs requêtes INSERT en parallèle
+statement_set = t_env.create_statement_set()
+
+# Règle métier 1 : Fraudes vers GCP
+statement_set.add_insert_sql("""
     INSERT INTO fraud_alerts
-    SELECT 
-        user_id, 
-        amount, 
-        merchant, 
-        location
+    SELECT user_id, amount, merchant, location
     FROM transactions 
     WHERE amount > 1000.0
-"""
+""")
 
-t_env.execute_sql(insert_query)
+# Règle métier 2 : Erreurs techniques vers la DLQ (Kafka)
+statement_set.add_insert_sql("""
+    INSERT INTO transactions_dlq
+    SELECT *
+    FROM transactions 
+    WHERE amount < 0.0
+""")
+
+# Exécution du graphe complet
+statement_set.execute()
