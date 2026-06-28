@@ -35,6 +35,8 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
+    volumes:
+      - ./flink_jobs:/opt/flink/flink_jobs
 
   taskmanager:
     image: flink:1.18.1-scala_2.12
@@ -47,3 +49,5 @@ services:
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 2
+    volumes:
+      - ./flink_jobs:/opt/flink/flink_jobs
