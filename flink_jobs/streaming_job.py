@@ -1,16 +1,22 @@
 import os
 from pyflink.table import EnvironmentSettings, TableEnvironment
 
-# 1. Configuration de l'environnement de Streaming Flink
+# 1. Configuration Flink et chargement des connecteurs (Kafka + Iceberg + GCS)
 env_settings = EnvironmentSettings.in_streaming_mode()
 t_env = TableEnvironment.create(env_settings)
 
-# Déclaration du connecteur Kafka (le fichier .jar)
-jar_path = "file:///opt/flink/flink_jobs/flink-sql-connector-kafka-3.1.0-1.18.jar"
-t_env.get_config().set("pipeline.jars", jar_path)
+#On force Iceberg à "valider" (commit) les données toutes les 10 secondes
+t_env.get_config().set("execution.checkpointing.interval", "10000")
 
-# 2. Connexion à la source (Le topic Kafka)
-# Note : Flink utilise "kafka:29092" pour parler au broker via le réseau interne de Docker
+jar_paths = ";".join([
+    "file:///opt/flink/flink_jobs/flink-sql-connector-kafka-3.1.0-1.18.jar",
+    "file:///opt/flink/flink_jobs/iceberg-flink-runtime-1.18-1.5.0.jar",
+    "file:///opt/flink/flink_jobs/gcs-connector-hadoop3-2.2.22-shaded.jar",
+    "file:///opt/flink/flink_jobs/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar"
+]) 
+t_env.get_config().set("pipeline.jars", jar_paths)
+
+# 2. La Source (Lecture depuis Kafka)
 source_ddl = """
     CREATE TABLE transactions (
         transaction_id STRING,
@@ -30,9 +36,27 @@ source_ddl = """
 """
 t_env.execute_sql(source_ddl)
 
-# 3. La logique métier (Détection de fraude)
-print("🔎 Démarrage du moteur Flink : Écoute du flux Kafka en cours...")
-query = """
+# 3. La Destination (Table Iceberg dans Google Cloud Storage)
+iceberg_ddl = """
+    CREATE TABLE fraud_alerts (
+        user_id STRING,
+        amount DOUBLE,
+        merchant STRING,
+        location STRING
+    ) WITH (
+        'connector' = 'iceberg',
+        'catalog-name' = 'gcp_catalog',
+        'catalog-type' = 'hadoop',
+        'warehouse' = 'gs://datalake-fraude-streaming-2026/warehouse'
+    )
+"""
+t_env.execute_sql(iceberg_ddl)
+
+# 4. Le Pipeline d'Écriture
+print("🚀 Lancement du Pipeline Flink : Écriture des fraudes vers Google Cloud Storage (Iceberg)...")
+
+insert_query = """
+    INSERT INTO fraud_alerts
     SELECT 
         user_id, 
         amount, 
@@ -42,5 +66,4 @@ query = """
     WHERE amount > 1000.0
 """
 
-# 4. Exécution (Affiche le résultat en direct dans la console)
-t_env.execute_sql(query).print()
+t_env.execute_sql(insert_query)

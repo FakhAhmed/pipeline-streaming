@@ -32,11 +32,14 @@ services:
       - "8081:8081"
     command: jobmanager
     environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/.config/gcloud/application_default_credentials.json
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
     volumes:
       - ./flink_jobs:/opt/flink/flink_jobs
+      - ~/.config/gcloud:/tmp/.config/gcloud:ro
+      - ./flink_jobs:/opt/flink/lib_ext
 
   taskmanager:
     image: flink:1.18.1-scala_2.12
@@ -45,9 +48,12 @@ services:
       - jobmanager
     command: taskmanager
     environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/.config/gcloud/application_default_credentials.json
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
         taskmanager.numberOfTaskSlots: 2
     volumes:
       - ./flink_jobs:/opt/flink/flink_jobs
+      - ~/.config/gcloud:/tmp/.config/gcloud:ro
+      - ./flink_jobs:/opt/flink/lib_ext
