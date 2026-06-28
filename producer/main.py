@@ -1,69 +1,77 @@
-import json
+import os
 import time
 import random
 from faker import Faker
 from confluent_kafka import Producer
+from confluent_kafka.serialization import StringSerializer, SerializationContext, MessageField
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroSerializer
 
 fake = Faker()
 
-# 1. Configuration pour se connecter au Kafka local (via Docker)
-conf = {
-    'bootstrap.servers': 'localhost:9092', 
-    'client.id': 'transaction-producer'
+# 1. Configuration du Schema Registry Client
+schema_registry_conf = {'url': 'http://localhost:8082'}
+schema_registry_client = SchemaRegistryClient(schema_registry_conf)
+
+# 2. Chargement du fichier de schéma Avro
+path_to_avsc = os.path.join(os.path.dirname(__file__), 'transaction.avsc')
+with open(path_to_avsc, 'r') as f:
+    schema_str = f.read()
+
+# 3. Configuration de l'Avro Serializer pour la valeur du message
+avro_serializer = AvroSerializer(
+    schema_registry_client,
+    schema_str,
+    to_dict=lambda obj, ctx: obj
+)
+
+# 4. Configuration du Producer Kafka
+producer_conf = {
+    'bootstrap.servers': 'localhost:9092',
+    'client.id': 'transaction-producer-avro'
 }
-producer = Producer(conf)
-topic = 'transactions'
+producer = Producer(producer_conf)
+topic = 'transactions-avro' 
 
 def delivery_report(err, msg):
-    """Fonction appelée automatiquement quand un message est (ou n'est pas) envoyé."""
     if err is not None:
-        print(f"❌ Erreur d'envoi: {err}")
+        print(f"❌ Erreur d'envoi Avro : {err}")
     else:
-        # Affichage clair et satisfaisant dans le terminal
-        print(f"✅ Envoyé : {msg.value().decode('utf-8')}")
+        print(f"✅ Envoyé (Avro validé) [Topic: {msg.topic()} | Partition: {msg.partition()}]")
 
 def generate_transaction():
-    """Génère une fausse transaction avec 5% de chance de fraude."""
-    # On simule un petit groupe de 50 clients pour voir leurs habitudes
     user_id = random.randint(100, 150) 
-    
-    # 5% de chance de générer une fraude (montant entre 1000 et 5000)
     is_fraudulent = random.random() < 0.05 
     amount = round(random.uniform(1000.0, 5000.0), 2) if is_fraudulent else round(random.uniform(5.0, 100.0), 2)
     
     return {
         "transaction_id": fake.uuid4(),
         "user_id": f"user_{user_id}",
-        "amount": amount,
-        "timestamp": int(time.time() * 1000), # Timestamp UNIX en millisecondes
+        "amount": float(amount), 
+        "timestamp": int(time.time() * 1000),
         "merchant": fake.company(),
         "location": fake.city()
     }
 
 if __name__ == "__main__":
-    print(f"🚀 Démarrage de la banque... Injection dans le topic Kafka '{topic}'")
-    print("Appuie sur Ctrl+C pour arrêter le flux.\n" + "-"*50)
+    print(f"🚀 Démarrage de la banque AVRO... Enregistrement du schéma sur http://localhost:8081")
+    print(f"Injection dans le topic sécurisé '{topic}'\n" + "-"*50)
     
     try:
         while True:
-            # 2. On génère la transaction
             transaction = generate_transaction()
             
-            # 3. On l'envoie dans Kafka
+            # Utilisation de l'AvroSerializer avec le bon Contexte (topic + type de champ)
             producer.produce(
-                topic, 
-                key=transaction["user_id"], 
-                value=json.dumps(transaction).encode('utf-8'),
+                topic=topic,
+                key=StringSerializer('utf_8')(transaction["user_id"]),
+                value=avro_serializer(transaction, SerializationContext(topic, MessageField.VALUE)),
                 callback=delivery_report
             )
-            producer.poll(0) # Gère les callbacks de manière asynchrone
-            
-            # 4. Pause entre 0.1s et 0.8s pour simuler le trafic réel
+            producer.poll(0)
             time.sleep(random.uniform(0.1, 0.8))
             
     except KeyboardInterrupt:
-        print("\n🛑 Arrêt manuel demandé par l'utilisateur.")
+        print("\n🛑 Arrêt du flux Avro.")
     finally:
-        print("⏳ Vidage du buffer Kafka en cours...")
         producer.flush()
-        print("🔌 Déconnecté proprement.")

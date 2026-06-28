@@ -1,0 +1,37 @@
+{
+  "type": "record",
+  "name": "Transaction",
+  "namespace": "com.streaming.fraude",
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "string",
+      "doc": "Identifiant unique de la transaction (UUID)"
+    },
+    {
+      "name": "user_id",
+      "type": "string",
+      "doc": "Identifiant de l'utilisateur"
+    },
+    {
+      "name": "amount",
+      "type": "double",
+      "doc": "Montant de la transaction"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "doc": "Timestamp UNIX en millisecondes"
+    },
+    {
+      "name": "merchant",
+      "type": "string",
+      "doc": "Nom du commerçant"
+    },
+    {
+      "name": "location",
+      "type": "string",
+      "doc": "Ville où la transaction a eu lieu"
+    }
+  ]
+}

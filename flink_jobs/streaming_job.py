@@ -12,11 +12,12 @@ jar_paths = ";".join([
     "file:///opt/flink/flink_jobs/flink-sql-connector-kafka-3.1.0-1.18.jar",
     "file:///opt/flink/flink_jobs/iceberg-flink-runtime-1.18-1.5.0.jar",
     "file:///opt/flink/flink_jobs/gcs-connector-hadoop3-2.2.22-shaded.jar",
-    "file:///opt/flink/flink_jobs/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar"
+    "file:///opt/flink/flink_jobs/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar",
+    "file:///opt/flink/flink_jobs/flink-sql-avro-confluent-registry-1.18.1.jar"
 ]) 
 t_env.get_config().set("pipeline.jars", jar_paths)
 
-# 2. La Source (Lecture depuis Kafka)
+# 2. La Source (Lecture depuis Kafka en AVRO)
 source_ddl = """
     CREATE TABLE transactions (
         transaction_id STRING,
@@ -27,10 +28,11 @@ source_ddl = """
         location STRING
     ) WITH (
         'connector' = 'kafka',
-        'topic' = 'transactions',
+        'topic' = 'transactions-avro',
         'properties.bootstrap.servers' = 'kafka:29092',
-        'properties.group.id' = 'fraud-detector-group',
-        'format' = 'json',
+        'properties.group.id' = 'fraud-detector-avro-group',
+        'format' = 'avro-confluent',
+        'avro-confluent.url' = 'http://schema-registry:8081',
         'scan.startup.mode' = 'latest-offset'
     )
 """
