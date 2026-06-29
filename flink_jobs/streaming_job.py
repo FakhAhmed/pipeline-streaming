@@ -82,13 +82,26 @@ dlq_ddl = """
 """
 t_env.execute_sql(dlq_ddl)
 
-# 5. Le Pipeline de Routage (Stateful Multi-Sink)
-print("🚀 Lancement du Pipeline Flink : Fenêtres Temporelles + DLQ...")
+# 5. Sink 3 : L'Alerting Opérationnel Temps Réel (Kafka JSON pour actions immédiates)
+alerts_urgent_ddl = """
+    CREATE TABLE alerts_urgent (
+        user_id STRING,
+        amount DOUBLE,
+        alert_reason STRING
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'alerts-urgent',
+        'properties.bootstrap.servers' = 'kafka:29092',
+        'format' = 'json'
+    )
+"""
+t_env.execute_sql(alerts_urgent_ddl)
 
+# 6. Routage Multi-Sink Synchrone et Parallèle
+print("🚀 Lancement du Pipeline Flink : Routage Multi-Sink Global (Iceberg + DLQ + Alertes Kafka)...")
 statement_set = t_env.create_statement_set()
 
-# Règle Métier Avancée : Fenêtre Glissante (HOP Window)
-# On calcule la somme sur 30 secondes, et on fait avancer la fenêtre toutes les 5 secondes
+# Branche A : Écriture analytique dans Iceberg (GCP)
 statement_set.add_insert_sql("""
     INSERT INTO fraud_alerts
     SELECT 
@@ -103,7 +116,21 @@ statement_set.add_insert_sql("""
     HAVING SUM(amount) > 2000.0
 """)
 
-# Règle DLQ : Inchangée, mais on précise les colonnes pour ignorer la colonne virtuelle event_time
+# Branche B : Notification instantanée (Kafka Alerts)
+statement_set.add_insert_sql("""
+    INSERT INTO alerts_urgent
+    SELECT 
+        user_id, 
+        SUM(amount) as amount, 
+        'ALERTE CRITIQUE : Seuil depasse (' || CAST(COUNT(transaction_id) AS STRING) || ' tx en 30s)' as alert_reason
+    FROM TABLE(
+        HOP(TABLE transactions, DESCRIPTOR(event_time), INTERVAL '5' SECOND, INTERVAL '30' SECOND)
+    )
+    GROUP BY user_id, window_start, window_end
+    HAVING SUM(amount) > 2000.0
+""")
+
+# Branche C : Isolement dans la DLQ
 statement_set.add_insert_sql("""
     INSERT INTO transactions_dlq
     SELECT transaction_id, user_id, amount, `timestamp`, merchant, location
